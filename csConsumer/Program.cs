@@ -1,6 +1,7 @@
 ﻿using Confluent.Kafka;
 using csConsumer.Models;
 using csConsumer.Services;
+using Elastic.Clients.Elasticsearch;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
@@ -14,10 +15,30 @@ var services = new ServiceCollection();
 
 services.AddSingleton<FilterIncommingReportService>();
 
+
+
+var elasticSearchSettings = new ElasticsearchClientSettings(
+    new Uri(configuration["ElasticSearch:Endpoint"])
+);
+
+var elasticSearchClient = new ElasticsearchClient(elasticSearchSettings);
+
+services.AddSingleton(elasticSearchClient);
+services.AddSingleton<ElasticsearchReportService>();
+
+
+
 var serviceProvider = services.BuildServiceProvider();
 
 var validator = serviceProvider
     .GetRequiredService<FilterIncommingReportService>();
+
+var elasticSearchService = serviceProvider
+    .GetRequiredService<ElasticsearchReportService>();
+
+
+await elasticSearchService.CreateIndexAsync();
+
 
 var config = new ConsumerConfig
 {
@@ -29,7 +50,9 @@ var config = new ConsumerConfig
 using var consumer = new ConsumerBuilder<string, string>(config).Build();
 
 consumer.Subscribe(configuration["Kafka:Topics:Raw-data"]);
-var cnt = 0;
+
+Console.WriteLine("Kafka consumer started.");
+
 while (true)
 {
     try
@@ -58,10 +81,9 @@ while (true)
 
         if (validator.Validate(report))
         {
-            cnt ++;
             Console.WriteLine($"Valid report: {report.ReportId}");
 
-            //add send to elastic!!!!
+            await elasticSearchService.IndexReportAsync(report);
         }
         else
         {

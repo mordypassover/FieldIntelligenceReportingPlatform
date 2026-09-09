@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace csConsumer.Models;
 
-internal class Report
+public class Report
 {
     [Required]
 
@@ -16,7 +16,7 @@ internal class Report
     public string ReportId { get; set; }
 
     [Required]
-    [JsonPropertyName("timestamp")]
+    [JsonPropertyName("@timestamp")]
     public DateTime Timestamp { get; set; }
     [Required]
     [JsonPropertyName("agentId")]
