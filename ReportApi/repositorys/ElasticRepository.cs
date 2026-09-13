@@ -1,22 +1,26 @@
 ﻿using ReportApi.Models;
-
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Aggregations;
 using Elastic.Clients.Elasticsearch.QueryDsl;
-
+using Microsoft.Extensions.Logging; 
 namespace ReportApi.repositorys;
 
 public class ElasticRepository : IElasticRepository
 {
     private readonly ElasticsearchClient _client;
+    private readonly ILogger<ElasticRepository> _logger; 
 
-    public ElasticRepository(ElasticsearchClient client)
+    public ElasticRepository(ElasticsearchClient client, ILogger<ElasticRepository> logger)
     {
         _client = client;
+        _logger = logger; 
     }
 
     public async Task<IEnumerable<Report>> SearchMesegesAsync(string search)
     {
+      
+        _logger.LogInformation(" Search for term: '{SearchTerm}'", search);
+
         var response = await _client.SearchAsync<Report>(s => s
             .Index("reports")
             .Query(q => q
@@ -27,10 +31,20 @@ public class ElasticRepository : IElasticRepository
             )
         );
 
+        if (!response.IsValidResponse)
+        {
+            
+            _logger.LogError("Failed to SearchMesegesAsync. Debug details: {DebugInformation}", response.DebugInformation);
+        }
+
         return response.Documents;
     }
+
     public async Task<IEnumerable<Report>> SearchSubjectReportsAsync(string subjectId)
     {
+       
+        _logger.LogInformation("Searching reports for SubjectId: '{SubjectId}'", subjectId);
+
         var response = await _client.SearchAsync<Report>(s => s
             .Index("reports")
             .Query(q => q
@@ -43,6 +57,9 @@ public class ElasticRepository : IElasticRepository
 
         if (!response.IsValidResponse)
         {
+           
+            _logger.LogError("SubjectId '{SubjectId}' not found. Debug details: {DebugInformation}",
+                subjectId, response.DebugInformation);
             throw new Exception(response.DebugInformation);
         }
 
@@ -54,6 +71,10 @@ public class ElasticRepository : IElasticRepository
         string? sector,
         string? location)
     {
+        
+        _logger.LogInformation("Filtering reports Theater: '{Theater}', Sector: '{Sector}', Location: '{Location}'",
+            theater, sector, location);
+
         var filters = new List<Query>();
 
         if (!string.IsNullOrWhiteSpace(theater))
@@ -95,6 +116,11 @@ public class ElasticRepository : IElasticRepository
             )
         );
 
+        if (!response.IsValidResponse)
+        {
+            _logger.LogError("Failed to filter by theater/sector/location. Debug details: {DebugInformation}", response.DebugInformation);
+        }
+
         return response.Documents;
     }
 
@@ -103,6 +129,9 @@ public class ElasticRepository : IElasticRepository
         DateTime? from,
         DateTime? to)
     {
+        _logger.LogInformation("Filtering reports - Priorities: {Priorities}, From: {From}, To: {To}",
+            priorities != null ? string.Join(", ", priorities) : "None", from, to);
+
         var filters = new List<Query>();
 
         if (priorities != null && priorities.Any())
@@ -115,8 +144,6 @@ public class ElasticRepository : IElasticRepository
                 Term = new TermsQueryField(termsValues)
             });
         }
-
-        // Date range filter using explicit DateRangeQuery object
         if (from.HasValue || to.HasValue)
         {
             filters.Add(new DateRangeQuery(Infer.Field<Report>(f => f.Timestamp))
@@ -126,7 +153,6 @@ public class ElasticRepository : IElasticRepository
             });
         }
 
-        // Execute query
         var response = await _client.SearchAsync<Report>(s => s
             .Index("reports")
             .Query(q => q
@@ -136,8 +162,14 @@ public class ElasticRepository : IElasticRepository
             )
         );
 
+        if (!response.IsValidResponse)
+        {
+            _logger.LogError("Failed to filter by priority and date. Debug details: {DebugInformation}", response.DebugInformation);
+        }
+
         return response.Documents;
     }
+
     public async Task<IEnumerable<Report>> SearchReportsAsync(
         string? search,
         string? theater,
@@ -148,6 +180,9 @@ public class ElasticRepository : IElasticRepository
         DateTime? from,
         DateTime? to)
     {
+        _logger.LogInformation("Running multi-field search - Search: '{Search}',Theater: '{Theater}', Sector: '{Sector}', Location: '{Location}', Priority: '{Priority}', Type: '{ReportType}'",
+            search, theater, sector, location, priorety, reportType);
+
         var filters = new List<Query>();
 
         if (!string.IsNullOrEmpty(theater))
@@ -211,36 +246,44 @@ public class ElasticRepository : IElasticRepository
             );
         }
 
-    var response = await _client.SearchAsync<Report>(s => s
-        .Index("reports")
-        .Query(q => q
-            .Bool(b =>
-            {
-                var mustQueries = new List<Query>();
-
-                if (!string.IsNullOrEmpty(search))
+        var response = await _client.SearchAsync<Report>(s => s
+            .Index("reports")
+            .Query(q => q
+                .Bool(b =>
                 {
-                    mustQueries.Add(
-                        new MatchQuery(Infer.Field<Report>(r => r.Message))
-                        {
-                            Query = search
-                        }
-                    );
-                }
+                    var mustQueries = new List<Query>();
 
-                var boolQuery = new BoolQuery
-                {
-                    Must = mustQueries,
-                    Filter = filters
-                };
-            })
-        )
-    );
+                    if (!string.IsNullOrEmpty(search))
+                    {
+                        mustQueries.Add(
+                            new MatchQuery(Infer.Field<Report>(r => r.Message))
+                            {
+                                Query = search
+                            }
+                        );
+                    }
+
+                    var boolQuery = new BoolQuery
+                    {
+                        Must = mustQueries,
+                        Filter = filters
+                    };
+                })
+            )
+        );
+
+        if (!response.IsValidResponse)
+        {
+            _logger.LogError("Failed executing SearchReportsAsync.Debug details: {DebugInformation}", response.DebugInformation);
+        }
 
         return response.Documents;
     }
+
     public async Task<StatisticsDto> GetStatisticsAsync()
     {
+        _logger.LogInformation("Getting report statistics from Elasticsearch.");
+
         var response = await _client.SearchAsync<Report>(s => s
             .Index("reports")
             .Size(0)
@@ -250,6 +293,11 @@ public class ElasticRepository : IElasticRepository
                 .Add("by_report_type", ag => ag.Terms(t => t.Field(f => f.ReportType)))
             )
         );
+
+        if (!response.IsValidResponse)
+        {
+            _logger.LogError("Failed to fetch statistics . Debug details: {DebugInformation}", response.DebugInformation);
+        }
 
         var result = new StatisticsDto();
 
@@ -270,6 +318,7 @@ public class ElasticRepository : IElasticRepository
                 result.ReportsByReportType = typeTerms.Buckets.ToDictionary(b => b.Key.ToString(), b => b.DocCount);
             }
         }
+        _logger.LogInformation("Successfully retrieved statistics");
 
         return result;
     }

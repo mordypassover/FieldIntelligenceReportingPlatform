@@ -4,41 +4,42 @@ using csConsumer.Services;
 using Elastic.Clients.Elasticsearch;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging; 
 using System.Text.Json;
 
 var configuration = new ConfigurationBuilder()
     .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("Appsettings.json")
+    .AddJsonFile("Appsettings.json",optional:true)
+    .AddEnvironmentVariables()
     .Build();
 
 var services = new ServiceCollection();
 
+
+services.AddLogging(builder =>
+{
+    builder.AddConsole(); 
+});
+
 services.AddSingleton<FilterIncommingReportService>();
-
-
 
 var elasticSearchSettings = new ElasticsearchClientSettings(
     new Uri(configuration["ElasticSearch:Endpoint"])
 );
-
 var elasticSearchClient = new ElasticsearchClient(elasticSearchSettings);
-
 services.AddSingleton(elasticSearchClient);
 services.AddSingleton<ElasticsearchReportService>();
 
-
-
 var serviceProvider = services.BuildServiceProvider();
 
-var validator = serviceProvider
-    .GetRequiredService<FilterIncommingReportService>();
 
-var elasticSearchService = serviceProvider
-    .GetRequiredService<ElasticsearchReportService>();
+var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
 
+var validator = serviceProvider.GetRequiredService<FilterIncommingReportService>();
+
+var elasticSearchService = serviceProvider.GetRequiredService<ElasticsearchReportService>();
 
 await elasticSearchService.CreateIndexAsync();
-
 
 var config = new ConsumerConfig
 {
@@ -48,10 +49,10 @@ var config = new ConsumerConfig
 };
 
 using var consumer = new ConsumerBuilder<string, string>(config).Build();
-
 consumer.Subscribe(configuration["Kafka:Topics:Raw-data"]);
 
-Console.WriteLine("Kafka consumer started.");
+
+logger.LogInformation("Kafka consumer started");
 
 while (true)
 {
@@ -69,29 +70,30 @@ while (true)
         }
         catch (JsonException ex)
         {
-            Console.WriteLine($"Invalid JSON: {ex.Message}");
+            
+            logger.LogWarning(ex, "Not valid JSON received: {Message}", ex.Message);
             continue;
         }
 
         if (report == null)
         {
-            Console.WriteLine("Report is null.");
+            logger.LogWarning("Deserialized report = null");
             continue;
         }
 
         if (validator.Validate(report))
         {
-            Console.WriteLine($"Valid report: {report.ReportId}");
+            logger.LogInformation("Valid report: {ReportId}", report.ReportId);
 
             await elasticSearchService.IndexReportAsync(report);
         }
         else
         {
-            Console.WriteLine($"Invalid report: {report.ReportId}");
+            logger.LogWarning("Invalid report didnt filter : {ReportId}", report.ReportId);
         }
     }
     catch (ConsumeException ex)
     {
-        Console.WriteLine($"Kafka error: {ex.Error.Reason}");
+        logger.LogError("Kafka consume error: {Reason}", ex.Error.Reason);
     }
 }

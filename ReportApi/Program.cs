@@ -1,4 +1,5 @@
 using Elastic.Clients.Elasticsearch;
+using ReportApi.Middlewares;
 using ReportApi.repositorys;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,12 +21,14 @@ builder.Services.AddScoped<IElasticRepository, ElasticRepository>();
 
 var app = builder.Build();
 
+app.UseMiddleware<GlobalExceptionMiddleware>();
+
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
+
+
     app.UseSwagger();
     app.UseSwaggerUI();
-}
+
 
 app.UseHttpsRedirection();
 

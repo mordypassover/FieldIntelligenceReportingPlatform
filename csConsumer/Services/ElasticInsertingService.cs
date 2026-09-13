@@ -1,16 +1,19 @@
 ﻿using csConsumer.Models;
 using Elastic.Clients.Elasticsearch;
+using Microsoft.Extensions.Logging;
 
 namespace csConsumer.Services;
 
 public class ElasticsearchReportService
 {
     private readonly ElasticsearchClient _client;
+    private readonly ILogger<ElasticsearchReportService> _logger; 
     private const string IndexName = "reports";
 
-    public ElasticsearchReportService(ElasticsearchClient client)
+    public ElasticsearchReportService(ElasticsearchClient client, ILogger<ElasticsearchReportService> logger)
     {
         _client = client;
+        _logger = logger; 
     }
 
     public async Task CreateIndexAsync()
@@ -19,7 +22,7 @@ public class ElasticsearchReportService
 
         if (existsResponse.Exists)
         {
-            Console.WriteLine($"Index '{IndexName}' already exists.");
+            _logger.LogInformation("Index '{IndexName}' already exists.", IndexName);
             return;
         }
 
@@ -45,12 +48,13 @@ public class ElasticsearchReportService
 
         if (response.IsValidResponse)
         {
-            Console.WriteLine($"Index '{IndexName}' created successfully.");
+
+            _logger.LogInformation("Index '{IndexName}' created", IndexName);
         }
         else
         {
-            Console.WriteLine($"Failed to create index '{IndexName}'.");
-            Console.WriteLine(response.DebugInformation);
+            _logger.LogError("Failed to create index '{IndexName}', details: {DebugInformation}",
+                IndexName, response.DebugInformation);
         }
     }
 
@@ -65,14 +69,13 @@ public class ElasticsearchReportService
 
         if (response.IsValidResponse)
         {
-            Console.WriteLine($"Indexed successfully: {report.ReportId}");
+            _logger.LogInformation("Indexed report successfully: {ReportId}", report.ReportId);
             return true;
         }
 
-        Console.WriteLine($"Failed to index report: {report.ReportId}");
-        Console.WriteLine(response.DebugInformation);
+        _logger.LogError("Failed to index report: {ReportId}. Debug details: {DebugInformation}",
+            report.ReportId, response.DebugInformation);
 
         return false;
     }
 }
-
